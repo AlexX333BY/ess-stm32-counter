@@ -20,16 +20,31 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "stdbool.h"
 
 /* Private variables ---------------------------------------------------------*/
-TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef long_press_timer;
+TIM_HandleTypeDef increment_timer;
+
+uint32_t displayed_number = 0;
+const uint32_t MAX_DISPLAYED_NUMBER = 0x7f3;
+const uint16_t LONG_PRESS_TIME = 3000;
+const uint16_t NUMBER_INCREMENT_TIME = 1000;
+const uint16_t INCREMENT_PIN = GPIO_PIN_0,
+  RESET_PIN = GPIO_PIN_1,
+  OVERFLOW_SIGNAL_PIN = GPIO_PIN_7;
+bool long_press_timer_reached_timeout = false;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
+
+void IncrementDisplay(void);
+void ResetDisplay(void);
 
 /* Private user code ---------------------------------------------------------*/
 /**
@@ -50,9 +65,6 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
-
-  /* Infinite loop */
-  while (1);
 }
 
 /**
@@ -99,28 +111,25 @@ static void MX_TIM1_Init(void)
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  /* USER CODE BEGIN TIM1_Init 1 */
-
-  /* USER CODE END TIM1_Init 1 */
-  htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 7999;
-  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 3000;
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim1.Init.RepetitionCounter = 1;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  long_press_timer.Instance = TIM1;
+  long_press_timer.Init.Prescaler = 8000;
+  long_press_timer.Init.CounterMode = TIM_COUNTERMODE_UP;
+  long_press_timer.Init.Period = LONG_PRESS_TIME;
+  long_press_timer.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  long_press_timer.Init.RepetitionCounter = 0;
+  long_press_timer.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&long_press_timer) != HAL_OK)
   {
     Error_Handler();
   }
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  if (HAL_TIM_ConfigClockSource(&long_press_timer, &sClockSourceConfig) != HAL_OK)
   {
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  if (HAL_TIMEx_MasterConfigSynchronization(&long_press_timer, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -136,24 +145,24 @@ static void MX_TIM2_Init(void)
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 7999;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 1000;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  increment_timer.Instance = TIM2;
+  increment_timer.Init.Prescaler = 8000;
+  increment_timer.Init.CounterMode = TIM_COUNTERMODE_UP;
+  increment_timer.Init.Period = NUMBER_INCREMENT_TIME;
+  increment_timer.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  increment_timer.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&increment_timer) != HAL_OK)
   {
     Error_Handler();
   }
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  if (HAL_TIM_ConfigClockSource(&increment_timer, &sClockSourceConfig) != HAL_OK)
   {
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  if (HAL_TIMEx_MasterConfigSynchronization(&increment_timer, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -192,19 +201,19 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Pin = INCREMENT_PIN;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Pin = RESET_PIN;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
+  GPIO_InitStruct.Pin = OVERFLOW_SIGNAL_PIN;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -216,6 +225,73 @@ static void MX_GPIO_Init(void)
 
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim == &long_press_timer) {
+    HAL_TIM_Base_Start_IT(&increment_timer);
+    HAL_TIM_Base_Stop_IT(&long_press_timer);
+    long_press_timer_reached_timeout = true;
+  } else if (htim == &increment_timer) {
+    IncrementDisplay();
+  }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == INCREMENT_PIN) {
+    /* Increment button */
+    if (HAL_GPIO_ReadPin(GPIOB, INCREMENT_PIN) == GPIO_PIN_RESET) {
+      /* Button was pressed */
+      HAL_TIM_Base_Start_IT(&long_press_timer);
+    } else {
+      /* Button was released */
+      if (!long_press_timer_reached_timeout) {
+        HAL_TIM_Base_Stop_IT(&long_press_timer);
+        IncrementDisplay();
+      } else {
+        long_press_timer_reached_timeout = false;
+      }
+    }
+  } else if (GPIO_Pin == RESET_PIN) {
+    /* Reset button was pressed */
+    ResetDisplay();
+  }
+}
+
+void IncrementDisplay(void)
+{
+  displayed_number = (displayed_number + 1) % (MAX_DISPLAYED_NUMBER + 1);
+  if (displayed_number == 0) {
+    HAL_GPIO_WritePin(GPIOB, OVERFLOW_SIGNAL_PIN, GPIO_PIN_SET);
+  } else if (displayed_number == 1) {
+    HAL_GPIO_WritePin(GPIOB, OVERFLOW_SIGNAL_PIN, GPIO_PIN_RESET);
+  }
+
+  uint16_t cur_number_pin = GPIO_PIN_0;
+  uint32_t shifted_displayed_number = displayed_number;
+  const uint8_t number_pins_count = 12;
+  for (uint8_t i = 0; i < number_pins_count; ++i) {
+    HAL_GPIO_WritePin(GPIOA, cur_number_pin, shifted_displayed_number % 2 == 0 ? GPIO_PIN_RESET : GPIO_PIN_SET);
+    cur_number_pin <<= 1;
+    shifted_displayed_number >>= 1;
+  }
+}
+void ResetDisplay(void)
+{
+  HAL_TIM_Base_Stop_IT(&long_press_timer);
+  HAL_TIM_Base_Stop_IT(&increment_timer);
+  HAL_GPIO_WritePin(GPIOB, OVERFLOW_SIGNAL_PIN, GPIO_PIN_RESET);
+  displayed_number = 0;
+  long_press_timer_reached_timeout = false;
+
+  uint16_t cur_number_pin = GPIO_PIN_0;
+  const uint8_t number_pins_count = 12;
+  for (uint8_t i = 0; i < number_pins_count; ++i) {
+    HAL_GPIO_WritePin(GPIOA, cur_number_pin, GPIO_PIN_RESET);
+    cur_number_pin <<= 1;
+  }
 }
 
 /**
