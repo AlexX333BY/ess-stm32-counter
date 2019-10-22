@@ -112,7 +112,7 @@ static void MX_TIM1_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   long_press_timer.Instance = TIM1;
-  long_press_timer.Init.Prescaler = 8000;
+  long_press_timer.Init.Prescaler = 8000 - 1;
   long_press_timer.Init.CounterMode = TIM_COUNTERMODE_UP;
   long_press_timer.Init.Period = LONG_PRESS_TIME;
   long_press_timer.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -146,7 +146,7 @@ static void MX_TIM2_Init(void)
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   increment_timer.Instance = TIM2;
-  increment_timer.Init.Prescaler = 8000;
+  increment_timer.Init.Prescaler = 8000 - 1;
   increment_timer.Init.CounterMode = TIM_COUNTERMODE_UP;
   increment_timer.Init.Period = NUMBER_INCREMENT_TIME;
   increment_timer.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
